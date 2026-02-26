@@ -1,6 +1,5 @@
 import asyncio
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth  # 가장 표준적인 임포트 방식
 from bs4 import BeautifulSoup
 import re
 import requests
@@ -24,14 +23,18 @@ async def run_bot():
         notified_ids = set()
 
     async with async_playwright() as p:
+        # 가상 브라우저 실행
         browser = await p.chromium.launch(headless=True)
+        # 실제 사람 브라우저처럼 보이기 위한 컨텍스트 설정
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            viewport={'width': 1920, 'height': 1080}
         )
+        
         page = await context.new_page()
         
-        # [수정] stealth 함수 호출 방식 최적화
-        await stealth(page)
+        # [핵심] 수동 봇 감지 우회: navigator.webdriver 속성을 제거합니다.
+        await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         newly_notified = []
 
@@ -40,7 +43,7 @@ async def run_bot():
                 target_url = f"{BASE_URL}{page_num}"
                 print(f"🔎 {page_num}페이지 분석 시작...")
                 
-                # 차단을 피하기 위해 페이지 이동
+                # 차단을 피하기 위해 domcontentloaded까지만 기다린 후 여유 있게 대기
                 await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
                 await page.wait_for_timeout(8000) 
                 
@@ -50,34 +53,35 @@ async def run_bot():
 
                 print(f"📊 {page_num}페이지에서 {len(posts)}개 글 발견")
 
-                if len(posts) > 0:
-                    for post in posts:
-                        try:
-                            vote_tag = post.select_one(".pc_voted_count .count")
-                            if not vote_tag: continue
+                for post in posts:
+                    try:
+                        # 추천수 추출
+                        vote_tag = post.select_one(".pc_voted_count .count")
+                        if not vote_tag: continue
+                        
+                        votes = int(re.sub(r'[^0-9]', '', vote_tag.get_text()) or 0)
+                        
+                        # 기준: 250추 이상
+                        if votes >= 250:
+                            link_tag = post.select_one("h3.title a")
+                            raw_href = link_tag['href']
+                            post_id = raw_href.split('document_srl=')[-1].split('&')[0]
                             
-                            votes = int(re.sub(r'[^0-9]', '', vote_tag.get_text()) or 0)
-                            
-                            if votes >= 250:
-                                link_tag = post.select_one("h3.title a")
-                                raw_href = link_tag['href']
-                                post_id = raw_href.split('document_srl=')[-1].split('&')[0]
+                            if post_id not in notified_ids:
+                                title_tag = post.select_one(".ellipsis-target")
+                                title = title_tag.get_text(strip=True) if title_tag else "제목없음"
+                                full_link = f"https://www.fmkorea.com{raw_href}" if raw_href.startswith('/') else raw_href
                                 
-                                if post_id not in notified_ids:
-                                    title_tag = post.select_one(".ellipsis-target")
-                                    title = title_tag.get_text(strip=True) if title_tag else "제목없음"
-                                    full_link = f"https://www.fmkorea.com{raw_href}" if raw_href.startswith('/') else raw_href
-                                    
-                                    if WEBHOOK_URL:
-                                        msg = f"🔥 **250추 돌파 인기글**\n**제목:** {title}\n**추천:** {votes}개\n**링크:** {full_link}"
-                                        requests.post(WEBHOOK_URL, json={"content": msg})
-                                        notified_ids.add(post_id)
-                                        newly_notified.append(title)
-                                        print(f"✅ 알림 전송: {title}")
-                        except Exception:
-                            continue
+                                if WEBHOOK_URL:
+                                    msg = f"🔥 **250추 돌파 인기글**\n**제목:** {title}\n**추천:** {votes}개\n**링크:** {full_link}"
+                                    requests.post(WEBHOOK_URL, json={"content": msg})
+                                    notified_ids.add(post_id)
+                                    newly_notified.append(title)
+                                    print(f"✅ 알림 전송: {title} ({votes}추)")
+                    except Exception:
+                        continue
                 
-                await asyncio.sleep(3)
+                await asyncio.sleep(2)
 
             # 결과 저장
             with open(DB_FILE, 'w', encoding='utf-8') as f:
