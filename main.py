@@ -1,6 +1,6 @@
 import asyncio
 from playwright.async_api import async_playwright
-import playwright_stealth
+from playwright_stealth import stealth  # 가장 표준적인 임포트 방식
 from bs4 import BeautifulSoup
 import re
 import requests
@@ -30,8 +30,8 @@ async def run_bot():
         )
         page = await context.new_page()
         
-        # [수정] 비동기용 stealth 함수를 명확하게 호출
-        await playwright_stealth.stealth_async(page)
+        # [수정] stealth 함수 호출 방식 최적화
+        await stealth(page)
         
         newly_notified = []
 
@@ -40,7 +40,7 @@ async def run_bot():
                 target_url = f"{BASE_URL}{page_num}"
                 print(f"🔎 {page_num}페이지 분석 시작...")
                 
-                # 차단을 피하기 위해 domcontentloaded 상태까지만 기다림
+                # 차단을 피하기 위해 페이지 이동
                 await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
                 await page.wait_for_timeout(8000) 
                 
