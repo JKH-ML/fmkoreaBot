@@ -1,16 +1,19 @@
 import asyncio
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth  # stealth_async 대신 stealth를 가져옵니다.
+import playwright_stealth
+from bs4 import BeautifulSoup
 import re
 import requests
 import json
 import os
 
+# 설정
 DB_FILE = "notified_ids.json"
 WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK')
 BASE_URL = "https://www.fmkorea.com/index.php?mid=afreecatv&sort_index=pop&order_type=desc&page="
 
 async def run_bot():
+    # 1. 기존 알림 목록 로드
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, 'r', encoding='utf-8') as f:
@@ -27,8 +30,8 @@ async def run_bot():
         )
         page = await context.new_page()
         
-        # [수정된 부분] 비동기 페이지에서도 stealth(page)를 사용합니다.
-        await stealth(page)
+        # [수정] 비동기용 stealth 함수를 명확하게 호출
+        await playwright_stealth.stealth_async(page)
         
         newly_notified = []
 
@@ -37,7 +40,7 @@ async def run_bot():
                 target_url = f"{BASE_URL}{page_num}"
                 print(f"🔎 {page_num}페이지 분석 시작...")
                 
-                # 차단을 피하기 위해 domcontentloaded 상태까지만 기다리고 직접 대기 시간을 줍니다.
+                # 차단을 피하기 위해 domcontentloaded 상태까지만 기다림
                 await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
                 await page.wait_for_timeout(8000) 
                 
@@ -76,14 +79,13 @@ async def run_bot():
                 
                 await asyncio.sleep(3)
 
+            # 결과 저장
             with open(DB_FILE, 'w', encoding='utf-8') as f:
                 json.dump(list(notified_ids)[-1000:], f)
             print(f"🏁 작업 완료. 새 알림: {len(newly_notified)}개")
 
         finally:
             await browser.close()
-
-from bs4 import BeautifulSoup # BeautifulSoup 임포트 누락 방지
 
 if __name__ == "__main__":
     asyncio.run(run_bot())
