@@ -1,7 +1,6 @@
 import asyncio
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth_async
-from bs4 import BeautifulSoup
+from playwright_stealth import stealth  # stealth_async 대신 stealth를 가져옵니다.
 import re
 import requests
 import json
@@ -22,16 +21,14 @@ async def run_bot():
         notified_ids = set()
 
     async with async_playwright() as p:
-        # 가상 브라우저 실행
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            viewport={'width': 1920, 'height': 1080}
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
         page = await context.new_page()
         
-        # [핵심] 스텔스 모드 적용 (봇 감지 우회)
-        await stealth_async(page)
+        # [수정된 부분] 비동기 페이지에서도 stealth(page)를 사용합니다.
+        await stealth(page)
         
         newly_notified = []
 
@@ -40,8 +37,8 @@ async def run_bot():
                 target_url = f"{BASE_URL}{page_num}"
                 print(f"🔎 {page_num}페이지 분석 시작...")
                 
-                # 타임아웃을 늘리고 실제 사람처럼 동작 유도
-                await page.goto(target_url, wait_until="networkidle", timeout=90000)
+                # 차단을 피하기 위해 domcontentloaded 상태까지만 기다리고 직접 대기 시간을 줍니다.
+                await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
                 await page.wait_for_timeout(8000) 
                 
                 content = await page.content()
@@ -85,6 +82,8 @@ async def run_bot():
 
         finally:
             await browser.close()
+
+from bs4 import BeautifulSoup # BeautifulSoup 임포트 누락 방지
 
 if __name__ == "__main__":
     asyncio.run(run_bot())
