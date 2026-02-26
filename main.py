@@ -45,8 +45,8 @@ def check_fmkorea():
                     if not vote_tag: continue
                     votes = int(vote_tag.text.strip().replace(',', '') or 0)
 
-                    # 추천 300개 이상 조건 확인
-                    if votes >= 300:
+                    # 추천 250개 이상 조건 확인
+                    if votes >= 250:
                         link_tag = post.select_one("h3.title a")
                         # href에서 document_srl(글번호) 추출 [cite: 1, 2]
                         href = link_tag['href']
@@ -55,7 +55,7 @@ def check_fmkorea():
                         # 이미 보낸 알림인지 확인
                         if post_id not in notified_ids:
                             title = post.select_one("span.ellipsis-target").text.strip() # 
-                            msg = f"🔥 **300추 돌파 인기글!**\n**제목:** {title}\n**추천:** {votes}개\n**링크:** https://www.fmkorea.com/{post_id}"
+                            msg = f"🔥 **250추 돌파 인기글!**\n**제목:** {title}\n**추천:** {votes}개\n**링크:** https://www.fmkorea.com/{post_id}"
                             
                             # 디스코드 전송
                             if WEBHOOK_URL:
