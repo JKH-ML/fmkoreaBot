@@ -19,7 +19,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests beautifulsoup4 playwright
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 playwright playwright-stealth
           playwright install chromium
 
       - name: Run script
