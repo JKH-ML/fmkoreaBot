@@ -27,3 +27,12 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: python main.py
+
+      # 실패 시 스크린샷 아티팩트 업로드 (디버깅용)
+      - name: Upload debug screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: "*.png"
+          retention-days: 1
