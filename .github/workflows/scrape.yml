@@ -2,12 +2,16 @@ name: FMKorea Scraper to Discord
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 매일 한국 시간 오전 9시 (UTC 00:00)
-  workflow_dispatch: # 수동 실행 가능
+    # 한국 시간(UTC+9): 09:00, 13:00, 17:00, 21:00
+    # UTC 기준: 00:00, 04:00, 08:00, 12:00
+    - cron: '0 0,4,8,12 * * *'
+  workflow_dispatch:
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # GitHub Repository에 파일을 푸시하기 위해 쓰기 권한 설정
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,13 +32,20 @@ jobs:
       - name: Run scraper with Virtual Display
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        # xvfb-run을 통해 가상의 모니터를 띄우고 실행하여 헤드리스 봇 탐지를 우회함
         run: xvfb-run python main.py
 
-      - name: Upload debug screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-screenshots
-          path: "*.png"
-          retention-days: 1
+      - name: Commit and push changes
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          # data.json 파일이 존재하지 않을 수도 있으므로 체크 후 git add
+          if [ -f data.json ]; then
+            git add data.json
+            # 변경사항이 있는 경우에만 커밋 및 푸시
+            if ! git diff --quiet --staged; then
+              git commit -m "Update data.json [skip ci]"
+              git push
+            else
+              echo "No changes to commit."
+            fi
+          fi
