@@ -3,6 +3,7 @@ import os
 import time
 import requests
 import json
+import random
 from bs4 import BeautifulSoup
 from seleniumbase import SB
 from urllib.parse import urlparse, parse_qs
@@ -24,7 +25,6 @@ def load_data():
     return []
 
 def save_data(data):
-    # 최대 100개 유지 (오래된 항목 삭제)
     if len(data) > 100:
         data = data[-100:]
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -66,25 +66,38 @@ def get_top_posts():
     new_posts = []
     new_ids = []
 
-    print(f"수집을 시작합니다 (현재 저장된 글 번호: {len(processed_ids)}개)")
+    print(f"수집을 시작합니다... (현재 저장된 글 번호: {len(processed_ids)}개)")
     
-    # uc=True로 설정하여 undetected 모드 사용
-    with SB(uc=True, test=True, headless=False, locale_code="ko") as sb:
-        for page_num in range(1, 6):
-            url = base_url.format(page_num)
-            try:
+    # 더 정교한 우회를 위해 stealth 설정을 강화한 SB 실행
+    with SB(uc=True, test=True, headless=False, locale_code="ko", ad_block=True) as sb:
+        try:
+            # 1. 메인 페이지를 먼저 방문하여 세션 쿠키를 생성 (사람처럼 행동)
+            print("메인 페이지 접속 중 (세션 생성)...")
+            sb.uc_open_with_reconnect("https://www.fmkorea.com/", 6)
+            time.sleep(random.uniform(5, 8))
+            
+            # 2. 게시판 페이지 순회
+            for page_num in range(1, 6):
+                url = base_url.format(page_num)
                 print(f"\n[{page_num}페이지 접속 중...]")
-                sb.uc_open_with_reconnect(url, 4)
-                time.sleep(5) # 페이지 로딩 대기 시간 충분히 확보
                 
-                # Cloudflare 체크
+                # 접속 시도 (최대 7회 재시도하며 보안 우회)
+                sb.uc_open_with_reconnect(url, 7)
+                time.sleep(random.uniform(7, 10))
+                
                 title = sb.get_title()
                 print(f"페이지 타이틀: {title}")
                 
-                if "Just a moment" in title or "Cloudflare" in title:
-                    print("보안 확인 페이지가 감지되었습니다. 우회를 시도합니다.")
-                    sb.uc_gui_click_captcha()
-                    time.sleep(5)
+                # 보안 페이지 감지 시 추가 대응
+                if "보안" in title or "Just a moment" in title:
+                    print("보안 페이지 감지! 캡차 우회 시도...")
+                    try:
+                        sb.uc_gui_click_captcha()
+                        time.sleep(10)
+                        title = sb.get_title()
+                        print(f"재접속 후 타이틀: {title}")
+                    except:
+                        print("캡차 클릭 실패 또는 버튼 없음.")
                 
                 html = sb.get_page_source()
                 soup = BeautifulSoup(html, 'html.parser')
@@ -95,7 +108,7 @@ def get_top_posts():
                 found_new_on_page = 0
                 
                 if total_on_page == 0:
-                    print("게시글을 찾지 못했습니다. 스크린샷을 저장합니다.")
+                    print(f"주의: {page_num}페이지에서 게시글을 찾지 못했습니다. (보안 차단 가능성)")
                     sb.save_screenshot(f"debug_page_{page_num}.png")
                 
                 for post in posts:
@@ -129,14 +142,15 @@ def get_top_posts():
                         new_ids.append(doc_id)
                         found_new_on_page += 1
                 
-                print(f"결과: 전체 {total_on_page}개 중 최고 추천수 {max_count_on_page}, 새로 추가된 글 {found_new_on_page}개")
+                print(f"결과: {total_on_page}개 수집, 최고 추천수 {max_count_on_page}, 신규 {found_new_on_page}개")
+                time.sleep(random.uniform(2, 4))
                 
-            except Exception as e:
-                print(f"{page_num}페이지 오류: {e}")
-                continue
+        except Exception as e:
+            print(f"전체 프로세스 중 치명적 오류: {e}")
+            sb.save_screenshot("fatal_error.png")
 
     if new_posts:
-        print(f"\n총 {len(new_posts)}개의 새로운 게시글을 발견했습니다.")
+        print(f"\n총 {len(new_posts)}개의 새로운 게시글 발견. 데이터를 업데이트하고 디스코드로 전송합니다.")
         processed_ids.extend(new_ids)
         save_data(processed_ids)
         send_discord_message(webhook_url, new_posts)
