@@ -3,7 +3,7 @@ import os
 import time
 import requests
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
+from seleniumbase import SB
 
 # Windows에서 한국어 출력을 위해 인코딩 설정
 if hasattr(sys.stdout, 'reconfigure'):
@@ -11,7 +11,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 def send_discord_message(webhook_url, posts):
     if not webhook_url:
-        print("디스코드 웹훅 URL이 설정되지 않았습니다. 메일 전송을 건너뜁니다.")
+        print("디스코드 웹훅 URL이 설정되지 않았습니다. 전송을 건너뜁니다.")
         return
 
     if not posts:
@@ -44,48 +44,37 @@ def get_top_posts():
     all_posts = []
     webhook_url = os.environ.get("DISCORD_WEBHOOK")
 
-    print("브라우저를 실행하여 데이터를 수집합니다 (1~5 페이지)...")
+    print("SeleniumBase(Undetected 모드)를 실행하여 데이터를 수집합니다...")
     
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        # 보안 탐지 우회를 위해 추가 설정
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewport={'width': 1280, 'height': 800},
-            locale="ko-KR",
-            timezone_id="Asia/Seoul"
-        )
-        page_obj = context.new_page()
-
+    # uc=True: Cloudflare 우회를 위한 undetected-chromedriver 활성화
+    # 가상 모니터(Xvfb)를 사용할 것이므로 script 내부에서는 headless=False로 설정
+    with SB(uc=True, test=True, headless=False, locale_code="ko") as sb:
         for page_num in range(1, 6):
             url = base_url.format(page_num)
             try:
-                # 봇 탐지를 피하기 위해Referer 추가 및 이동
-                page_obj.goto("https://www.google.com", wait_until="domcontentloaded")
-                time.sleep(1)
+                print(f"{page_num}페이지 접속 중...")
                 
-                print(f"{page_num}페이지 접속 중: {url}")
-                page_obj.goto(url, wait_until="domcontentloaded", timeout=60000)
+                # Cloudflare 우회를 위한 특수 접속 메서드
+                sb.uc_open_with_reconnect(url, 4)
+                time.sleep(3)
                 
-                # 로딩 대기 시간 충분히 확보
-                time.sleep(5)
+                # Cloudflare 캡차가 보일 경우 자동 클릭 시도
+                try:
+                    sb.uc_gui_click_captcha()
+                    time.sleep(2)
+                except:
+                    pass # 캡차가 없으면 무시
                 
-                html = page_obj.content()
+                html = sb.get_page_source()
                 soup = BeautifulSoup(html, 'html.parser')
                 
-                # 페이지 제목 출력 (차단 여부 확인용)
-                print(f"페이지 타이틀: {page_obj.title()}")
+                print(f"페이지 타이틀: {sb.get_title()}")
                 
                 posts = soup.select('li.li')
                 
                 if not posts:
-                    # 게시글을 찾지 못한 경우 스크린샷 저장
-                    page_obj.screenshot(path=f"debug_page_{page_num}.png")
+                    sb.save_screenshot(f"debug_page_{page_num}.png")
                     print(f"주의: {page_num}페이지에서 게시글 리스트를 찾지 못했습니다. (스크린샷 저장됨)")
-                    
-                    # 혹시 Cloudflare 차단 페이지인지 확인
-                    if "Cloudflare" in html or "Verify" in html:
-                        print("보안 차단 페이지(Cloudflare 등)가 감지되었습니다.")
                 
                 page_posts_count = 0
                 for post in posts:
@@ -113,13 +102,13 @@ def get_top_posts():
                 
             except Exception as e:
                 print(f"{page_num}페이지 수집 중 오류: {str(e)}")
-                page_obj.screenshot(path=f"error_page_{page_num}.png")
+                try:
+                    sb.save_screenshot(f"error_page_{page_num}.png")
+                except:
+                    pass
                 continue
 
-        browser.close()
-
     if all_posts:
-        # 추천수 기준 내림차순 정렬 및 중복 제거
         all_posts.sort(key=lambda x: x['count'], reverse=True)
         unique_posts = []
         seen_links = set()

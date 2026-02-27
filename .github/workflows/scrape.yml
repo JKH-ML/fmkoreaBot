@@ -17,18 +17,20 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install dependencies & Virtual Display
         run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 playwright
-          playwright install chromium
+          pip install requests beautifulsoup4 seleniumbase
+          seleniumbase install chromedriver
 
-      - name: Run scraper
+      - name: Run scraper with Virtual Display
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python main.py
+        # xvfb-run을 통해 가상의 모니터를 띄우고 실행하여 헤드리스 봇 탐지를 우회함
+        run: xvfb-run python main.py
 
-      # 실패 시 스크린샷 아티팩트 업로드 (디버깅용)
       - name: Upload debug screenshots
         if: always()
         uses: actions/upload-artifact@v4
