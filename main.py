@@ -1,95 +1,119 @@
-import asyncio
-from playwright.async_api import async_playwright
-from bs4 import BeautifulSoup
-import re
-import requests
-import json
+import sys
 import os
+import time
+import requests
+from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
-# 설정
-DB_FILE = "notified_ids.json"
-WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK')
-BASE_URL = "https://www.fmkorea.com/index.php?mid=afreecatv&sort_index=pop&order_type=desc&page="
+# Windows에서 한국어 출력을 위해 인코딩 설정
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
 
-async def run_bot():
-    # 1. 기존 알림 목록 로드
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, 'r', encoding='utf-8') as f:
-                notified_ids = set(json.load(f))
-        except:
-            notified_ids = set()
-    else:
-        notified_ids = set()
+def send_discord_message(webhook_url, posts):
+    if not webhook_url:
+        print("디스코드 웹훅 URL이 설정되지 않았습니다.")
+        return
 
-    async with async_playwright() as p:
-        # 가상 브라우저 실행
-        browser = await p.chromium.launch(headless=True)
-        # 실제 사람 브라우저처럼 보이기 위한 컨텍스트 설정
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            viewport={'width': 1920, 'height': 1080}
+    embeds = []
+    for i, post in enumerate(posts[:5], 1):
+        embeds.append({
+            "title": f"{i}. [추천: {post['count']}] {post['title']}",
+            "url": post['link'],
+            "color": 5814783 # FMKorea 느낌의 파란색 계열
+        })
+
+    payload = {
+        "content": "📢 **FM코리아 아프리카TV 게시판 추천 TOP 5 (1~5페이지)**",
+        "embeds": embeds
+    }
+
+    try:
+        response = requests.post(webhook_url, json=payload)
+        if response.status_code == 204:
+            print("디스코드 메시지 전송 성공!")
+        else:
+            print(f"디스코드 메시지 전송 실패: {response.status_code}, {response.text}")
+    except Exception as e:
+        print(f"디스코드 전송 중 예외 발생: {e}")
+
+def get_top_posts():
+    base_url = "https://www.fmkorea.com/index.php?mid=afreecatv&sort_index=pop&order_type=desc&page={}"
+    all_posts = []
+    webhook_url = os.environ.get("DISCORD_WEBHOOK")
+
+    print("브라우저를 실행하여 데이터를 수집합니다 (1~5 페이지)...")
+    
+    with sync_playwright() as p:
+        # 브라우저 실행
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
         )
-        
-        page = await context.new_page()
-        
-        # [핵심] 수동 봇 감지 우회: navigator.webdriver 속성을 제거합니다.
-        await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        
-        newly_notified = []
+        page_obj = context.new_page()
 
-        try:
-            for page_num in range(1, 6):
-                target_url = f"{BASE_URL}{page_num}"
-                print(f"🔎 {page_num}페이지 분석 시작...")
+        for page_num in range(1, 6):
+            url = base_url.format(page_num)
+            try:
+                page_obj.goto(url, wait_until="domcontentloaded", timeout=60000)
+                # 게시글 리스트가 로드될 때까지 대기
+                time.sleep(3)
                 
-                # 차단을 피하기 위해 domcontentloaded까지만 기다린 후 여유 있게 대기
-                await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
-                await page.wait_for_timeout(8000) 
+                html = page_obj.content()
+                soup = BeautifulSoup(html, 'html.parser')
                 
-                content = await page.content()
-                soup = BeautifulSoup(content, 'html.parser')
-                posts = soup.select("li.li")
-
-                print(f"📊 {page_num}페이지에서 {len(posts)}개 글 발견")
-
+                posts = soup.select('li.li')
+                
+                page_posts_count = 0
                 for post in posts:
-                    try:
-                        # 추천수 추출
-                        vote_tag = post.select_one(".pc_voted_count .count")
-                        if not vote_tag: continue
+                    title_elem = post.select_one('h3.title span.ellipsis-target')
+                    if not title_elem:
+                        title_elem = post.select_one('h3.title a')
+                    
+                    count_elem = post.select_one('span.count')
+                    link_elem = post.select_one('h3.title a')
+                    
+                    if title_elem and count_elem:
+                        title = " ".join(title_elem.get_text().split())
+                        try:
+                            count_text = count_elem.get_text(strip=True)
+                            count = int(''.join(filter(str.isdigit, count_text)))
+                        except:
+                            count = 0
                         
-                        votes = int(re.sub(r'[^0-9]', '', vote_tag.get_text()) or 0)
+                        link = link_elem['href'] if link_elem else ""
+                        if link and not link.startswith('http'):
+                            link = "https://www.fmkorea.com" + link
                         
-                        # 기준: 250추 이상
-                        if votes >= 250:
-                            link_tag = post.select_one("h3.title a")
-                            raw_href = link_tag['href']
-                            post_id = raw_href.split('document_srl=')[-1].split('&')[0]
-                            
-                            if post_id not in notified_ids:
-                                title_tag = post.select_one(".ellipsis-target")
-                                title = title_tag.get_text(strip=True) if title_tag else "제목없음"
-                                full_link = f"https://www.fmkorea.com{raw_href}" if raw_href.startswith('/') else raw_href
-                                
-                                if WEBHOOK_URL:
-                                    msg = f"🔥 **250추 돌파 인기글**\n**제목:** {title}\n**추천:** {votes}개\n**링크:** {full_link}"
-                                    requests.post(WEBHOOK_URL, json={"content": msg})
-                                    notified_ids.add(post_id)
-                                    newly_notified.append(title)
-                                    print(f"✅ 알림 전송: {title} ({votes}추)")
-                    except Exception:
-                        continue
+                        all_posts.append({
+                            'title': title,
+                            'count': count,
+                            'link': link
+                        })
+                        page_posts_count += 1
                 
-                await asyncio.sleep(2)
+                print(f"{page_num}페이지 완료 (수집된 게시글: {page_posts_count})")
+                
+            except Exception as e:
+                print(f"{page_num}페이지 수집 중 오류: {str(e)}")
+                continue
 
-            # 결과 저장
-            with open(DB_FILE, 'w', encoding='utf-8') as f:
-                json.dump(list(notified_ids)[-1000:], f)
-            print(f"🏁 작업 완료. 새 알림: {len(newly_notified)}개")
+        browser.close()
 
-        finally:
-            await browser.close()
+    if not all_posts:
+        print("\n수집된 게시글이 없습니다.")
+        return
+
+    # 추천수 기준 내림차순 정렬 및 중복 제거
+    all_posts.sort(key=lambda x: x['count'], reverse=True)
+    unique_posts = []
+    seen_links = set()
+    for p in all_posts:
+        if p['link'] not in seen_links:
+            unique_posts.append(p)
+            seen_links.add(p['link'])
+    
+    # 디스코드 전송
+    send_discord_message(webhook_url, unique_posts[:5])
 
 if __name__ == "__main__":
-    asyncio.run(run_bot())
+    get_top_posts()
