@@ -77,7 +77,7 @@ def get_top_posts():
             time.sleep(random.uniform(5, 8))
             
             # 2. 게시판 페이지 순회
-            for page_num in range(1, 6):
+            for page_num in range(1, 11):
                 url = base_url.format(page_num)
                 print(f"\n[{page_num}페이지 접속 중...]")
                 
